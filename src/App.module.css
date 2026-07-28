@@ -355,3 +355,41 @@
   font-size: 13px;
   color: var(--ink);
 }
+
+.linkRow {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.liveGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.liveCard {
+  background: #fff;
+  border: 1px solid var(--grey-light);
+  border-radius: 8px;
+  padding: 14px 16px;
+}
+
+.liveNumbers {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 8px;
+  font-size: 13px;
+  color: var(--ink);
+}
+
+.chartSvg {
+  width: 100%;
+  height: auto;
+  border: 1px solid var(--grey-light);
+  border-radius: 8px;
+  background: #fff;
+}

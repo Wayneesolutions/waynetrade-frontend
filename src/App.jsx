@@ -283,21 +283,28 @@ function ReasonPrompt({ title, onConfirm, onCancel }) {
   );
 }
 
-function MemberRow({ member, conn, onChanged, onViewAudit }) {
-  const [prompt, setPrompt] = useState(null); // "pause" | "resume" | null
+function MemberRow({ member, conn, onChanged, onViewAudit, onEdit, onViewEquity }) {
+  const [prompt, setPrompt] = useState(null); // "pause" | "resume" | "remove" | null
   const [busy, setBusy] = useState(false);
 
   async function act(action, reason) {
     setBusy(true);
     try {
-      const path =
-        action === "pause"
-          ? `/kill-switch/member/${member.id}`
-          : `/kill-switch/member/${member.id}/resume`;
-      await apiFetch(conn.baseUrl, conn.apiKey, path, {
-        method: "POST",
-        body: JSON.stringify({ triggeredBy: "dashboard", reason }),
-      });
+      if (action === "remove") {
+        await apiFetch(conn.baseUrl, conn.apiKey, `/onboarding/member/${member.id}`, {
+          method: "DELETE",
+          body: JSON.stringify({ reason }),
+        });
+      } else {
+        const path =
+          action === "pause"
+            ? `/kill-switch/member/${member.id}`
+            : `/kill-switch/member/${member.id}/resume`;
+        await apiFetch(conn.baseUrl, conn.apiKey, path, {
+          method: "POST",
+          body: JSON.stringify({ triggeredBy: "dashboard", reason }),
+        });
+      }
       setPrompt(null);
       onChanged();
     } catch (err) {
@@ -307,12 +314,19 @@ function MemberRow({ member, conn, onChanged, onViewAudit }) {
     }
   }
 
+  const promptTitles = {
+    pause: `Pause ${member.userId}?`,
+    resume: `Resume ${member.userId}?`,
+    remove: `Remove ${member.userId}? They stop receiving signals; their audit history is kept.`,
+  };
+
   return (
     <div className={styles.memberRow}>
       <div className={styles.memberInfo}>
         <div className={styles.memberName}>{member.userId}</div>
         <div className={styles.memberMeta}>
           {member.brokerType} · <span className="mono">{member.brokerAccountRef}</span>
+          {member.riskProfile ? ` · ${Number(member.riskProfile.fixedLots)} lots` : " · no risk profile"}
         </div>
       </div>
       <StatusPill status={member.status} />
@@ -326,22 +340,35 @@ function MemberRow({ member, conn, onChanged, onViewAudit }) {
         )}
       </div>
       <div className={styles.memberActions}>
-        <button className={styles.buttonLink} onClick={() => onViewAudit(member.id)}>
-          Audit trail
-        </button>
+        <div className={styles.linkRow}>
+          <button className={styles.buttonLink} onClick={() => onViewAudit(member.id)}>
+            Audit trail
+          </button>
+          <button className={styles.buttonLink} onClick={() => onViewEquity(member)}>
+            Equity chart
+          </button>
+          <button className={styles.buttonLink} onClick={() => onEdit(member)}>
+            Edit
+          </button>
+          {member.status !== "REMOVED" && (
+            <button className={styles.buttonLink} style={{ color: "var(--red)" }} onClick={() => setPrompt("remove")}>
+              Remove
+            </button>
+          )}
+        </div>
         {member.status === "PAUSED" ? (
           <button className={styles.buttonSmall} disabled={busy} onClick={() => setPrompt("resume")}>
             Resume
           </button>
-        ) : (
+        ) : member.status !== "REMOVED" ? (
           <button className={styles.buttonSmallDanger} disabled={busy} onClick={() => setPrompt("pause")}>
             Pause
           </button>
-        )}
+        ) : null}
       </div>
       {prompt && (
         <ReasonPrompt
-          title={prompt === "pause" ? `Pause ${member.userId}?` : `Resume ${member.userId}?`}
+          title={promptTitles[prompt]}
           onCancel={() => setPrompt(null)}
           onConfirm={(reason) => act(prompt, reason)}
         />
@@ -620,6 +647,253 @@ function AddStrategyModal({ conn, onClose, onAdded }) {
   );
 }
 
+function EditMemberModal({ conn, member, onClose, onSaved }) {
+  const [userId, setUserId] = useState(member.userId);
+  const [brokerAccountRef, setBrokerAccountRef] = useState(member.brokerAccountRef);
+  const [fixedLots, setFixedLots] = useState(
+    member.riskProfile ? String(member.riskProfile.fixedLots) : ""
+  );
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  async function handleSubmit(e) {
+    e.preventDefault();
+    setError("");
+    if (!userId || !brokerAccountRef) {
+      setError("User ID and broker account reference are required.");
+      return;
+    }
+    setBusy(true);
+    try {
+      await apiFetch(conn.baseUrl, conn.apiKey, `/onboarding/member/${member.id}`, {
+        method: "PUT",
+        body: JSON.stringify({ userId, brokerAccountRef }),
+      });
+      if (fixedLots !== "" && Number(fixedLots) > 0) {
+        await apiFetch(conn.baseUrl, conn.apiKey, `/onboarding/member/${member.id}/risk-profile`, {
+          method: "PUT",
+          body: JSON.stringify({ fixedLots: Number(fixedLots) }),
+        });
+      }
+      onSaved();
+      onClose();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className={styles.modalOverlay} onClick={onClose}>
+      <div className={styles.modalCard} onClick={(e) => e.stopPropagation()}>
+        <h3 className={styles.h3}>Edit {member.userId}</h3>
+        <p className={styles.subtle}>
+          Pausing/resuming for trading reasons still goes through the
+          Pause/Resume buttons so it's audit-logged — this form is only for
+          fixing details.
+        </p>
+        <form onSubmit={handleSubmit} className={styles.form}>
+          <label className={styles.label}>
+            User ID
+            <input className={styles.input} value={userId} onChange={(e) => setUserId(e.target.value)} />
+          </label>
+          <label className={styles.label}>
+            Broker account reference
+            <input
+              className={styles.input}
+              value={brokerAccountRef}
+              onChange={(e) => setBrokerAccountRef(e.target.value)}
+            />
+          </label>
+          <label className={styles.label}>
+            Fixed lot size (risk profile)
+            <input
+              className={styles.input}
+              type="number"
+              step="0.01"
+              min="0"
+              value={fixedLots}
+              onChange={(e) => setFixedLots(e.target.value)}
+              placeholder="unset — member is rejected until set"
+            />
+          </label>
+          {error && <p className={styles.errorText}>{error}</p>}
+          <div className={styles.modalActions}>
+            <button type="button" className={styles.buttonGhost} onClick={onClose}>
+              Cancel
+            </button>
+            <button className={styles.buttonPrimary} type="submit" disabled={busy}>
+              {busy ? "Saving…" : "Save changes"}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+function EquityChartModal({ conn, member, onClose }) {
+  const [snapshots, setSnapshots] = useState(null);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    apiFetch(conn.baseUrl, conn.apiKey, `/dashboard/member/${member.id}/equity-history`)
+      .then(setSnapshots)
+      .catch((err) => setError(err.message));
+  }, [conn, member.id]);
+
+  let chart = null;
+  if (snapshots && snapshots.length >= 2) {
+    const values = snapshots.map((s) => Number(s.equity));
+    const min = Math.min(...values);
+    const max = Math.max(...values);
+    const range = max - min || 1;
+    const W = 560;
+    const H = 180;
+    const PAD = 10;
+    const points = values
+      .map((v, i) => {
+        const x = PAD + (i / (values.length - 1)) * (W - 2 * PAD);
+        const y = H - PAD - ((v - min) / range) * (H - 2 * PAD);
+        return `${x.toFixed(1)},${y.toFixed(1)}`;
+      })
+      .join(" ");
+    const first = values[0];
+    const last = values[values.length - 1];
+    const change = last - first;
+    const currency = snapshots[snapshots.length - 1].currency;
+    chart = (
+      <>
+        <p className={styles.subtle}>
+          {snapshots.length} snapshots · latest equity{" "}
+          <b>
+            {last.toFixed(2)} {currency}
+          </b>{" "}
+          · change over this history:{" "}
+          <b style={{ color: change >= 0 ? "var(--green)" : "var(--red)" }}>
+            {change >= 0 ? "+" : ""}
+            {change.toFixed(2)} {currency}
+          </b>
+        </p>
+        <svg viewBox={`0 0 ${W} ${H}`} className={styles.chartSvg} role="img" aria-label="Equity over time">
+          <polyline
+            points={points}
+            fill="none"
+            stroke={change >= 0 ? "var(--green)" : "var(--red)"}
+            strokeWidth="2"
+          />
+        </svg>
+        <p className={styles.subtleSmall}>
+          {new Date(snapshots[0].capturedAt).toLocaleString()} —{" "}
+          {new Date(snapshots[snapshots.length - 1].capturedAt).toLocaleString()}
+        </p>
+      </>
+    );
+  }
+
+  return (
+    <div className={styles.modalOverlay} onClick={onClose}>
+      <div className={styles.modalCardWide} onClick={(e) => e.stopPropagation()}>
+        <div className={styles.modalHeader}>
+          <h3 className={styles.h3}>Equity over time — {member.userId}</h3>
+          <button className={styles.buttonGhost} onClick={onClose}>
+            Close
+          </button>
+        </div>
+        {error && <p className={styles.errorText}>{error}</p>}
+        {!snapshots && !error && <p className={styles.subtle}>Loading…</p>}
+        {snapshots && snapshots.length < 2 && (
+          <p className={styles.subtle}>
+            Not enough history yet. Snapshots are captured each time live data
+            is refreshed (button in the Live accounts section) — history builds
+            up while the dashboard is being used.
+          </p>
+        )}
+        {chart}
+      </div>
+    </div>
+  );
+}
+
+function LiveOverview({ conn, members }) {
+  const [live, setLive] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+
+  const refresh = useCallback(() => {
+    setLoading(true);
+    setError("");
+    apiFetch(conn.baseUrl, conn.apiKey, `/dashboard/group/${conn.groupId}/live`)
+      .then(setLive)
+      .catch((err) => setError(err.message))
+      .finally(() => setLoading(false));
+  }, [conn]);
+
+  const byMember = {};
+  (live || []).forEach((r) => {
+    byMember[r.memberId] = r;
+  });
+
+  return (
+    <section className={styles.section}>
+      <div className={styles.modalHeader}>
+        <h2 className={styles.h2}>Live accounts (MetaApi)</h2>
+        <button className={styles.buttonGhost} onClick={refresh} disabled={loading}>
+          {loading ? "Fetching…" : "Refresh live data"}
+        </button>
+      </div>
+      <p className={styles.subtleSmall}>
+        Balance/equity/floating P&amp;L straight from each member's own broker
+        account via MetaApi — this IS live data, unlike the order history
+        below. Each refresh also saves an equity snapshot for the charts.
+      </p>
+      {error && <p className={styles.errorText}>{error}</p>}
+      {!live && !error && (
+        <p className={styles.subtleSmall} style={{ marginTop: 8 }}>
+          Not fetched yet — click "Refresh live data".
+        </p>
+      )}
+      {live && (
+        <div className={styles.liveGrid}>
+          {members
+            .filter((m) => m.status !== "REMOVED")
+            .map((m) => {
+              const r = byMember[m.id];
+              if (!r) return null;
+              if (!r.ok) {
+                return (
+                  <div key={m.id} className={styles.liveCard}>
+                    <div className={styles.memberName}>{m.userId}</div>
+                    <p className={styles.subtleSmall}>{r.error}</p>
+                  </div>
+                );
+              }
+              const info = r.accountInformation;
+              const floating = Number(info.equity) - Number(info.balance);
+              return (
+                <div key={m.id} className={styles.liveCard}>
+                  <div className={styles.memberName}>{m.userId}</div>
+                  <div className={styles.liveNumbers}>
+                    <span>
+                      Balance: <b>{Number(info.balance).toFixed(2)}</b> {info.currency}
+                    </span>
+                    <span>
+                      Equity: <b>{Number(info.equity).toFixed(2)}</b> {info.currency}
+                    </span>
+                    <span style={{ color: floating >= 0 ? "var(--green)" : "var(--red)" }}>
+                      Floating P&amp;L: <b>{floating >= 0 ? "+" : ""}{floating.toFixed(2)}</b> {info.currency}
+                    </span>
+                  </div>
+                </div>
+              );
+            })}
+        </div>
+      )}
+    </section>
+  );
+}
+
 function GroupDashboard({ conn, onDisconnect }) {
   const [group, setGroup] = useState(null);
   const [error, setError] = useState("");
@@ -627,6 +901,40 @@ function GroupDashboard({ conn, onDisconnect }) {
   const [auditMemberId, setAuditMemberId] = useState(null);
   const [showAddMember, setShowAddMember] = useState(false);
   const [showAddStrategy, setShowAddStrategy] = useState(false);
+  const [editMember, setEditMember] = useState(null);
+  const [equityMember, setEquityMember] = useState(null);
+
+  async function archiveStrategy(strategy) {
+    if (
+      !window.confirm(
+        `Archive "${strategy.name}"? Its webhook stops accepting signals immediately; its audit history is kept. This cannot be undone — recreate the strategy (new secret) to trade it again.`
+      )
+    ) {
+      return;
+    }
+    try {
+      await apiFetch(conn.baseUrl, conn.apiKey, `/onboarding/strategy/${strategy.id}`, {
+        method: "DELETE",
+      });
+      refresh();
+    } catch (err) {
+      alert(err.message);
+    }
+  }
+
+  async function renameStrategy(strategy) {
+    const name = window.prompt("New name for this strategy:", strategy.name);
+    if (!name || name === strategy.name) return;
+    try {
+      await apiFetch(conn.baseUrl, conn.apiKey, `/onboarding/strategy/${strategy.id}`, {
+        method: "PUT",
+        body: JSON.stringify({ name }),
+      });
+      refresh();
+    } catch (err) {
+      alert(err.message);
+    }
+  }
 
   const refresh = useCallback(() => {
     apiFetch(conn.baseUrl, conn.apiKey, `/dashboard/group/${conn.groupId}`)
@@ -715,14 +1023,28 @@ function GroupDashboard({ conn, onDisconnect }) {
                     {s.sourceType} · <span className="mono">/webhook/{s.id}</span>
                   </div>
                 </div>
-                <span className={styles.subtleSmall}>
-                  Lost the secret? Create a new strategy — secrets can't be re-shown.
-                </span>
+                <div className={styles.linkRow}>
+                  <button className={styles.buttonLink} onClick={() => renameStrategy(s)}>
+                    Rename
+                  </button>
+                  <button
+                    className={styles.buttonLink}
+                    style={{ color: "var(--red)" }}
+                    onClick={() => archiveStrategy(s)}
+                  >
+                    Archive
+                  </button>
+                </div>
               </div>
             ))}
           </div>
         )}
+        <p className={styles.subtleSmall} style={{ marginTop: 8 }}>
+          Lost a secret? Secrets can't be re-shown — archive the strategy and create a new one.
+        </p>
       </section>
+
+      <LiveOverview conn={conn} members={group.members} />
 
       <section className={styles.section}>
         <h2 className={styles.h2}>Members</h2>
@@ -738,6 +1060,8 @@ function GroupDashboard({ conn, onDisconnect }) {
               conn={conn}
               onChanged={refresh}
               onViewAudit={setAuditMemberId}
+              onEdit={setEditMember}
+              onViewEquity={setEquityMember}
             />
           ))}
         </div>
@@ -758,6 +1082,17 @@ function GroupDashboard({ conn, onDisconnect }) {
       )}
       {showAddStrategy && (
         <AddStrategyModal conn={conn} onClose={() => setShowAddStrategy(false)} onAdded={refresh} />
+      )}
+      {editMember && (
+        <EditMemberModal
+          conn={conn}
+          member={editMember}
+          onClose={() => setEditMember(null)}
+          onSaved={refresh}
+        />
+      )}
+      {equityMember && (
+        <EquityChartModal conn={conn} member={equityMember} onClose={() => setEquityMember(null)} />
       )}
     </div>
   );
