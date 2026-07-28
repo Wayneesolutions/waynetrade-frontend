@@ -18,21 +18,23 @@ audit trail. Talks directly to a running `waynetrade-backend` deployment.
 - Per-member audit trail: every risk decision (approve/reject/resize) with
   its reason, and the resulting order status if one was placed.
 - Auto-refreshes every 15 seconds.
+- **New:** Create a group directly from the connect screen ("Create one")
+  instead of needing direct database access.
+- **New:** Add member and Add strategy forms in the group header. Adding a
+  strategy shows its webhook secret exactly once — copy it into TradingView
+  immediately, it cannot be retrieved again afterwards.
 
 ## What is NOT built (Phase 2 items still open)
 
 - **No live P&L or live position data.** Everything shown comes from our own
   database (orders + risk_decisions), not a live poll of MetaApi/Kite
   account equity or open positions. That's a separate integration.
-- **No group/member onboarding UI.** Adding a group, inviting members,
-  linking their broker accounts, and setting risk profiles all currently
-  require going directly into the database — there's no form for any of it
-  yet.
 - **No login/user accounts.** The "admin API key" is one shared secret for
   whoever has it — there's no concept of an individual logged-in user here.
-  Anyone with the key can pause anyone.
+  Anyone with the key can pause anyone or create groups/strategies.
 - **No charts/visualizations of P&L over time** — only per-order and
   per-decision list views.
+- **No editing/removing members or strategies** yet — only creating them.
 - **No mobile-specific layout testing** beyond basic responsive CSS.
 
 ## Setup
@@ -42,12 +44,11 @@ npm install
 npm run dev
 ```
 
-Then open the app and enter:
-- Your `waynetrade-backend` URL (e.g. `http://localhost:4000` while
-  developing, or its Railway URL once deployed)
-- The `ADMIN_API_KEY` value from that backend's `.env`
-- A group ID (a row in the `groups` table — there's no group-creation UI
-  yet, so this currently has to be inserted directly via Prisma Studio or SQL)
+Then open the app and either:
+- **Create a new group**: click "Create one" on the connect screen, enter
+  your backend URL, admin API key, group name, and your admin user ID.
+- **Connect to an existing group**: enter your backend URL, admin API key,
+  and the group's ID.
 
 ## Deploy
 
