@@ -1,0 +1,31 @@
+:root {
+  --navy: #1b2a4a;
+  --navy-light: #2c3f68;
+  --gold: #b8860b;
+  --gold-light: #d9a534;
+  --rust: #8b1e24;
+  --cream: #f7f5f0;
+  --ink: #1a1a1a;
+  --grey: #6b7280;
+  --grey-light: #e5e7eb;
+  --green: #1e6b3a;
+  --amber: #9c6b00;
+  --red: #b3261e;
+  font-family: "IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--cream);
+  color: var(--ink);
+}
+
+#root {
+  min-height: 100vh;
+}
+
+.mono {
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+}
