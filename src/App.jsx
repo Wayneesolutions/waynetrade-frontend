@@ -72,7 +72,7 @@ function OrderStatusPill({ status }) {
 }
 
 function CreateGroupScreen({ onCreated, onBack }) {
-  const [baseUrl, setBaseUrl] = useState("http://localhost:4000");
+  const [baseUrl, setBaseUrl] = useState("https://waynetrade.wayneesolutions.com");
   const [apiKey, setApiKey] = useState("");
   const [groupName, setGroupName] = useState("");
   const [adminUserId, setAdminUserId] = useState("");
@@ -165,7 +165,7 @@ function CreateGroupScreen({ onCreated, onBack }) {
 
 function ConnectScreen({ onConnect }) {
   const [mode, setMode] = useState("connect"); // "connect" | "create"
-  const [baseUrl, setBaseUrl] = useState("http://localhost:4000");
+  const [baseUrl, setBaseUrl] = useState("https://waynetrade.wayneesolutions.com");
   const [apiKey, setApiKey] = useState("");
   const [groupId, setGroupId] = useState("");
   const [error, setError] = useState("");
