@@ -1,5 +1,10 @@
 # WayneTrade — Group Dashboard (first pass)
 
+> **⚠️ MERGED — see [arpanwayne/saaf-signal-frontend](https://github.com/arpanwayne/saaf-signal-frontend).**
+> This dashboard's Risk & Execution view now lives as a tab inside the
+> combined Saaf Signal frontend, alongside the forecast engine UI. This repo
+> is no longer actively developed — go to the link above for current work.
+
 A plain-language dashboard for a WayneTrade group: see member status, recent
 order outcomes, pause/resume with a required reason, and each member's full
 audit trail. Talks directly to a running `waynetrade-backend` deployment.
