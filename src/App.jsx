@@ -19,6 +19,22 @@ function saveConnection(conn) {
   localStorage.setItem("waynetrade_connection", JSON.stringify(conn));
 }
 
+// Deliberately a SEPARATE localStorage key and a separate connection shape
+// (memberId + viewToken, never apiKey) from the admin connection above —
+// keeps the two credential types from ever being read by the wrong screen.
+function loadInvestorConnection() {
+  try {
+    const raw = localStorage.getItem("waynetrade_investor_connection");
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+}
+
+function saveInvestorConnection(conn) {
+  localStorage.setItem("waynetrade_investor_connection", JSON.stringify(conn));
+}
+
 async function apiFetch(baseUrl, apiKey, path, options = {}) {
   const res = await fetch(`${baseUrl}${path}`, {
     ...options,
@@ -27,6 +43,28 @@ async function apiFetch(baseUrl, apiKey, path, options = {}) {
       "X-Api-Key": apiKey,
       ...(options.headers || {}),
     },
+  });
+  let data = null;
+  try {
+    data = await res.json();
+  } catch {
+    // no body
+  }
+  if (!res.ok) {
+    throw new Error(data?.error || `Request failed (${res.status})`);
+  }
+  return data;
+}
+
+// Separate from apiFetch on purpose, not just a parameterized version of
+// it — an investor's view token must never be sent as X-Api-Key (that
+// header is the shared admin secret; mixing the two up would be exactly
+// the kind of bug that defeats the whole point of having two auth
+// systems). Investor routes are read-only, so no body-sending call sites
+// need this to support POST/PUT the way apiFetch does.
+async function investorApiFetch(baseUrl, viewToken, path) {
+  const res = await fetch(`${baseUrl}${path}`, {
+    headers: { "X-View-Token": viewToken },
   });
   let data = null;
   try {
@@ -257,6 +295,12 @@ function ConnectScreen({ onConnect }) {
           <button type="button" className={styles.buttonLink} onClick={() => setMode("create")}>
             Create one
           </button>
+        </p>
+        <p className={styles.subtleSmall} style={{ marginTop: 6 }}>
+          Are you an investor, not a broker/admin?{" "}
+          <a className={styles.buttonLink} href="#investor">
+            View your own trades
+          </a>
         </p>
       </div>
     </div>
@@ -1114,7 +1158,293 @@ function GroupDashboard({ conn, onDisconnect }) {
   );
 }
 
-export default function App() {
+function InvestorConnectScreen({ onConnect }) {
+  const [baseUrl, setBaseUrl] = useState("https://waynetrade.wayneesolutions.com");
+  const [memberId, setMemberId] = useState("");
+  const [viewToken, setViewToken] = useState("");
+  const [error, setError] = useState("");
+  const [checking, setChecking] = useState(false);
+
+  async function handleSubmit(e) {
+    e.preventDefault();
+    setError("");
+    if (!baseUrl || !memberId || !viewToken) {
+      setError("All three fields are needed.");
+      return;
+    }
+    setChecking(true);
+    try {
+      const cleanBaseUrl = baseUrl.replace(/\/$/, "");
+      await investorApiFetch(cleanBaseUrl, viewToken, `/investor/${memberId}/overview`);
+      const conn = { baseUrl: cleanBaseUrl, memberId, viewToken };
+      saveInvestorConnection(conn);
+      onConnect(conn);
+    } catch (err) {
+      setError(err.message || "Could not verify that member ID and view token.");
+    } finally {
+      setChecking(false);
+    }
+  }
+
+  return (
+    <div className={styles.centerScreen}>
+      <div className={styles.card} style={{ maxWidth: 440 }}>
+        <p className={styles.eyebrow}>WayneTrade — Investor</p>
+        <h1 className={styles.h1}>View your own trades</h1>
+        <p className={styles.subtle}>
+          This is separate from the broker/admin dashboard — you'll only see
+          your own trades, notifications, and audit trail here, nothing
+          about anyone else. Your broker/admin gives you the member ID and
+          view token below when they add you (or afterwards, on request).
+        </p>
+        <form onSubmit={handleSubmit} className={styles.form}>
+          <label className={styles.label}>
+            Backend URL
+            <input
+              className={styles.input}
+              value={baseUrl}
+              onChange={(e) => setBaseUrl(e.target.value)}
+              placeholder="https://waynetrade-backend.up.railway.app"
+            />
+          </label>
+          <label className={styles.label}>
+            Your member ID
+            <input
+              className={styles.input}
+              value={memberId}
+              onChange={(e) => setMemberId(e.target.value)}
+              placeholder="uuid, from your broker/admin"
+            />
+          </label>
+          <label className={styles.label}>
+            Your view token
+            <input
+              className={styles.input}
+              type="password"
+              value={viewToken}
+              onChange={(e) => setViewToken(e.target.value)}
+              placeholder="from your broker/admin — never your admin API key"
+            />
+          </label>
+          {error && <p className={styles.errorText}>{error}</p>}
+          <button className={styles.buttonPrimary} type="submit" disabled={checking}>
+            {checking ? "Checking…" : "View my trades"}
+          </button>
+        </form>
+        <p className={styles.subtleSmall} style={{ marginTop: 14 }}>
+          Are you the broker/admin? <a className={styles.buttonLink} href="#">Go to the admin dashboard</a>
+        </p>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Investor's own read-only view — deliberately narrower than
+ * GroupDashboard: no kill-switch, no onboarding, no other members. Every
+ * request is scoped by the view token itself (see investor.js on the
+ * backend), not by anything this component chooses to show or hide, but
+ * this component also never renders a control that could act on anyone
+ * else's behalf, as a second layer of "an investor can't even try."
+ */
+function InvestorDashboard({ conn, onDisconnect }) {
+  const [overview, setOverview] = useState(null);
+  const [decisions, setDecisions] = useState(null);
+  const [notifications, setNotifications] = useState(null);
+  const [error, setError] = useState("");
+  const [saafSignalUrl, setSaafSignalUrl] = useState(
+    () => localStorage.getItem("waynetrade_saaf_signal_url") || ""
+  );
+
+  const refresh = useCallback(() => {
+    investorApiFetch(conn.baseUrl, conn.viewToken, `/investor/${conn.memberId}/overview`)
+      .then(setOverview)
+      .catch((err) => setError(err.message));
+    investorApiFetch(conn.baseUrl, conn.viewToken, `/investor/${conn.memberId}/audit`)
+      .then(setDecisions)
+      .catch(() => {});
+    investorApiFetch(conn.baseUrl, conn.viewToken, `/investor/${conn.memberId}/notifications`)
+      .then(setNotifications)
+      .catch(() => {});
+  }, [conn]);
+
+  useEffect(() => {
+    refresh();
+    const interval = setInterval(refresh, 15000);
+    return () => clearInterval(interval);
+  }, [refresh]);
+
+  function saveSaafSignalUrl(url) {
+    setSaafSignalUrl(url);
+    localStorage.setItem("waynetrade_saaf_signal_url", url);
+  }
+
+  if (error) {
+    return (
+      <div className={styles.centerScreen}>
+        <div className={styles.card}>
+          <p className={styles.errorText}>{error}</p>
+          <button className={styles.buttonGhost} onClick={onDisconnect}>
+            Reconnect
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  if (!overview) {
+    return <div className={styles.centerScreen}>Loading…</div>;
+  }
+
+  return (
+    <div className={styles.page}>
+      <header className={styles.header}>
+        <div>
+          <p className={styles.eyebrow}>WayneTrade — Investor</p>
+          <h1 className={styles.h1}>{overview.userId}</h1>
+          <p className={styles.subtle}>
+            {overview.groupName} · {overview.brokerType} · <StatusPill status={overview.status} />
+          </p>
+        </div>
+        <div className={styles.headerActions}>
+          {saafSignalUrl ? (
+            <a className={styles.buttonGhost} href={saafSignalUrl} target="_blank" rel="noreferrer">
+              Market forecasts &amp; track record
+            </a>
+          ) : (
+            <button
+              className={styles.buttonGhost}
+              onClick={() => {
+                const url = prompt("Saaf Signal site URL (e.g. https://saaf-signal-frontend.vercel.app):");
+                if (url) saveSaafSignalUrl(url);
+              }}
+            >
+              Link Saaf Signal site
+            </button>
+          )}
+          <button className={styles.buttonGhost} onClick={onDisconnect}>
+            Disconnect
+          </button>
+        </div>
+      </header>
+
+      <section className={styles.section}>
+        <h2 className={styles.h2}>Your risk settings</h2>
+        <p className={styles.subtleSmall}>
+          Fixed lot size: {overview.riskProfile?.fixedLots ?? "not set"} · Risk:reward
+          ratio: {overview.riskProfile?.riskRewardRatio ?? "not set"}
+        </p>
+      </section>
+
+      <section className={styles.section}>
+        <h2 className={styles.h2}>Your recent orders</h2>
+        {overview.recentOrders.length === 0 ? (
+          <p className={styles.subtleSmall}>No orders yet.</p>
+        ) : (
+          <div className={styles.memberList}>
+            {overview.recentOrders.map((o) => (
+              <div key={o.id} className={styles.memberRow} style={{ gridTemplateColumns: "1fr auto" }}>
+                <div className={styles.memberInfo}>
+                  <div className={styles.memberMeta}>{new Date(o.createdAt).toLocaleString()}</div>
+                </div>
+                <OrderStatusPill status={o.status} />
+              </div>
+            ))}
+          </div>
+        )}
+      </section>
+
+      <section className={styles.section}>
+        <h2 className={styles.h2}>Your transparency feed</h2>
+        <p className={styles.subtleSmall}>
+          Every trade explanation sent to you — win, loss, or rejected, shown the same way.
+        </p>
+        <div className={styles.feedList}>
+          {notifications?.length === 0 && (
+            <p className={styles.subtleSmall}>No notifications yet.</p>
+          )}
+          {notifications?.map((n) => (
+            <div key={n.id} className={styles.feedRow}>
+              <div className={styles.feedRowTop}>
+                <span className={styles.subtleSmall}>{timeAgo(n.createdAt)}</span>
+              </div>
+              <p className={styles.feedMessage}>{n.message}</p>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      <section className={styles.section}>
+        <h2 className={styles.h2}>Your full audit trail</h2>
+        <p className={styles.subtleSmall}>
+          Every risk decision made for your account — why it was approved,
+          rejected, or resized, and what order (if any) resulted.
+        </p>
+        <div className={styles.auditList}>
+          {decisions?.length === 0 && (
+            <p className={styles.subtle}>No decisions logged yet.</p>
+          )}
+          {decisions?.map((d) => (
+            <div key={d.id} className={styles.auditRow}>
+              <div className={styles.auditTop}>
+                <span
+                  className={styles.pillSmall}
+                  style={{
+                    borderColor: d.action === "APPROVE" ? "var(--green)" : "var(--red)",
+                    color: d.action === "APPROVE" ? "var(--green)" : "var(--red)",
+                  }}
+                >
+                  {d.action}
+                </span>
+                <span className={styles.subtleSmall}>{new Date(d.createdAt).toLocaleString()}</span>
+              </div>
+              <p className={styles.auditReason}>{d.reason}</p>
+              {d.order && (
+                <p className={styles.subtleSmall}>
+                  Order status: <OrderStatusPill status={d.order.status} />
+                </p>
+              )}
+            </div>
+          ))}
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function InvestorApp() {
+  const [conn, setConn] = useState(() => loadInvestorConnection());
+
+  function disconnect() {
+    localStorage.removeItem("waynetrade_investor_connection");
+    setConn(null);
+  }
+
+  if (!conn) {
+    return <InvestorConnectScreen onConnect={setConn} />;
+  }
+
+  return <InvestorDashboard conn={conn} onDisconnect={disconnect} />;
+}
+
+/**
+ * Hash-based routing — no router library, matching this project's minimal-
+ * dependency approach. #investor is the whole investor app (its own
+ * connect screen + dashboard, its own localStorage key, its own auth);
+ * everything else is the existing broker/admin app. A hash route (not a
+ * path route) needs no server-side rewrite rule to work on a static host.
+ */
+function useHashRoute() {
+  const [hash, setHash] = useState(() => window.location.hash);
+  useEffect(() => {
+    const onHashChange = () => setHash(window.location.hash);
+    window.addEventListener("hashchange", onHashChange);
+    return () => window.removeEventListener("hashchange", onHashChange);
+  }, []);
+  return hash;
+}
+
+function AdminApp() {
   const [conn, setConn] = useState(() => loadConnection());
 
   function disconnect() {
@@ -1127,4 +1457,9 @@ export default function App() {
   }
 
   return <GroupDashboard conn={conn} onDisconnect={disconnect} />;
+}
+
+export default function App() {
+  const hash = useHashRoute();
+  return hash === "#investor" ? <InvestorApp /> : <AdminApp />;
 }

@@ -46,6 +46,16 @@ audit trail. Talks directly to a running `waynetrade-backend` deployment.
   trigger a scan from the UI). Shows both the news-based confidence tag and
   the forecast engine's own historical read, side by side, when both exist
   for an article.
+- **New: a genuinely separate investor view** at `#investor` (own connect
+  screen, own `localStorage` key, own credential type — a per-member view
+  token, never the admin API key). Shows only that one member's own recent
+  orders, transparency feed, and audit trail — no kill-switch, no
+  onboarding, no visibility into anyone else. The main connect screen links
+  to it ("Are you an investor?"); it links back to the admin dashboard.
+  Optionally link out to a Saaf Signal deployment (track record/forecasts)
+  from the investor view's header — prompts once, remembers the URL.
+  Closes the "one shared dashboard for both roles" gap below, at least for
+  investors — brokers/admins still share the one `ADMIN_API_KEY`.
 
 ## What is NOT built (still open)
 
@@ -61,12 +71,16 @@ audit trail. Talks directly to a running `waynetrade-backend` deployment.
   (a member's risk:reward ratio can be changed via the backend's
   `PUT /onboarding/member/:id/risk-profile` directly, no UI for it yet).
 - **No mobile-specific layout testing** beyond basic responsive CSS.
-- **This is still one dashboard for both broker and investor roles** —
-  everyone with the admin API key sees everything. A properly separated
-  investor-facing view (their own trades/transparency feed only, no
-  kill-switch or onboarding controls) is a real gap, not just a nice-to-have
-  — see `docs/DEVELOPER_GUIDE.md` in `waynetrade-backend` for the "unified
-  frontend" item this is part of.
+- **The investor view (`#investor`) has no expiry/rotation UI of its own.**
+  If an investor loses their view token, only an admin can issue a new one
+  (`POST /onboarding/member/:id/view-token/regenerate`) — there's no
+  "forgot my token" self-service flow.
+- **Not combined with `saaf-signal-frontend`** — the investor view links out
+  to it (a plain external link, prompted for once), which is a real but
+  small step; the two are still separate deployments with separate design
+  systems, not one product surface. See `docs/DEVELOPER_GUIDE.md` in
+  `waynetrade-backend` for the fuller "unified frontend" item this is part
+  of.
 
 ## Setup
 
@@ -80,6 +94,9 @@ Then open the app and either:
   your backend URL, admin API key, group name, and your admin user ID.
 - **Connect to an existing group**: enter your backend URL, admin API key,
   and the group's ID.
+- **As an investor**: go to `/#investor` (or click "View your own trades" on
+  the main connect screen), and enter the backend URL plus the member ID
+  and view token your broker/admin gave you when they added you.
 
 ## Deploy
 
