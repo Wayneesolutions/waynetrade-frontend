@@ -28,8 +28,26 @@ audit trail. Talks directly to a running `waynetrade-backend` deployment.
 - **New:** Add member and Add strategy forms in the group header. Adding a
   strategy shows its webhook secret exactly once — copy it into TradingView
   immediately, it cannot be retrieved again afterwards.
+- **New:** Add-member form collects risk:reward ratio (auto profit-booking)
+  and a WhatsApp number for real-time trade alerts; group creation collects
+  the broker's own WhatsApp number for the research digest. Broker type
+  select offers Kite Connect (Indian equities) alongside MetaTrader — no
+  longer marked "not wired up", since it now is.
+- **New:** Each strategy row shows whether it has a SEBI Algo-ID set (green
+  pill) or not (amber warning — equities orders on it are rejected until
+  one is set), with a "Set/Update Algo-ID" action.
+- **New: Transparency feed section** — every real-time trade notification
+  sent to an investor, and every research digest sent to the broker, in one
+  auto-refreshing list, reading `waynetrade-backend`'s
+  `GET /dashboard/group/:groupId/notifications`.
+- **New: Research assistant section** — the AI news-analysis feed (Layer 2),
+  reading `GET /research/feed`, with a "Run scan now" button (there's no
+  scheduler on the backend yet, so this is currently the only way to
+  trigger a scan from the UI). Shows both the news-based confidence tag and
+  the forecast engine's own historical read, side by side, when both exist
+  for an article.
 
-## What is NOT built (Phase 2 items still open)
+## What is NOT built (still open)
 
 - **No live P&L or live position data.** Everything shown comes from our own
   database (orders + risk_decisions), not a live poll of MetaApi/Kite
@@ -39,8 +57,16 @@ audit trail. Talks directly to a running `waynetrade-backend` deployment.
   Anyone with the key can pause anyone or create groups/strategies.
 - **No charts/visualizations of P&L over time** — only per-order and
   per-decision list views.
-- **No editing/removing members or strategies** yet — only creating them.
+- **No editing/removing members or strategies** yet — only creating them
+  (a member's risk:reward ratio can be changed via the backend's
+  `PUT /onboarding/member/:id/risk-profile` directly, no UI for it yet).
 - **No mobile-specific layout testing** beyond basic responsive CSS.
+- **This is still one dashboard for both broker and investor roles** —
+  everyone with the admin API key sees everything. A properly separated
+  investor-facing view (their own trades/transparency feed only, no
+  kill-switch or onboarding controls) is a real gap, not just a nice-to-have
+  — see `docs/DEVELOPER_GUIDE.md` in `waynetrade-backend` for the "unified
+  frontend" item this is part of.
 
 ## Setup
 
