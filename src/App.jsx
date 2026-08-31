@@ -60,11 +60,14 @@ async function apiFetch(baseUrl, apiKey, path, options = {}) {
 // it — an investor's view token must never be sent as X-Api-Key (that
 // header is the shared admin secret; mixing the two up would be exactly
 // the kind of bug that defeats the whole point of having two auth
-// systems). Investor routes are read-only, so no body-sending call sites
-// need this to support POST/PUT the way apiFetch does.
-async function investorApiFetch(baseUrl, viewToken, path) {
+// systems). Almost every investor route is read-only GET; the one
+// exception (self-service token rotation) still authenticates with
+// X-View-Token, never X-Api-Key, so this still isn't apiFetch with a
+// parameter swapped in.
+async function investorApiFetch(baseUrl, viewToken, path, options = {}) {
   const res = await fetch(`${baseUrl}${path}`, {
-    headers: { "X-View-Token": viewToken },
+    ...options,
+    headers: { "X-View-Token": viewToken, ...(options.headers || {}) },
   });
   let data = null;
   try {
@@ -342,20 +345,31 @@ function ReasonPrompt({ title, onConfirm, onCancel }) {
 }
 
 function MemberRow({ member, conn, onChanged, onViewAudit }) {
-  const [prompt, setPrompt] = useState(null); // "pause" | "resume" | null
+  const [prompt, setPrompt] = useState(null); // "pause" | "resume" | "remove" | null
   const [busy, setBusy] = useState(false);
 
   async function act(action, reason) {
     setBusy(true);
     try {
-      const path =
-        action === "pause"
-          ? `/kill-switch/member/${member.id}`
-          : `/kill-switch/member/${member.id}/resume`;
-      await apiFetch(conn.baseUrl, conn.apiKey, path, {
-        method: "POST",
-        body: JSON.stringify({ triggeredBy: "dashboard", reason }),
-      });
+      if (action === "remove") {
+        // Soft delete — status: REMOVED, no "un-remove" route exists on
+        // purpose (matches the backend's "more permanent than pause"
+        // design). Confirmed once via ReasonPrompt below; no second
+        // confirmation dialog on top of it.
+        await apiFetch(conn.baseUrl, conn.apiKey, `/onboarding/member/${member.id}`, {
+          method: "DELETE",
+          body: JSON.stringify({ triggeredBy: "dashboard", reason }),
+        });
+      } else {
+        const path =
+          action === "pause"
+            ? `/kill-switch/member/${member.id}`
+            : `/kill-switch/member/${member.id}/resume`;
+        await apiFetch(conn.baseUrl, conn.apiKey, path, {
+          method: "POST",
+          body: JSON.stringify({ triggeredBy: "dashboard", reason }),
+        });
+      }
       setPrompt(null);
       onChanged();
     } catch (err) {
@@ -364,6 +378,8 @@ function MemberRow({ member, conn, onChanged, onViewAudit }) {
       setBusy(false);
     }
   }
+
+  const removed = member.status === "REMOVED";
 
   return (
     <div className={styles.memberRow}>
@@ -387,19 +403,34 @@ function MemberRow({ member, conn, onChanged, onViewAudit }) {
         <button className={styles.buttonLink} onClick={() => onViewAudit(member.id)}>
           Audit trail
         </button>
-        {member.status === "PAUSED" ? (
-          <button className={styles.buttonSmall} disabled={busy} onClick={() => setPrompt("resume")}>
-            Resume
-          </button>
-        ) : (
-          <button className={styles.buttonSmallDanger} disabled={busy} onClick={() => setPrompt("pause")}>
-            Pause
-          </button>
+        {/* Once removed, no further action is possible — matches the
+            backend having no "un-remove" route at all. */}
+        {!removed && (
+          <>
+            {member.status === "PAUSED" ? (
+              <button className={styles.buttonSmall} disabled={busy} onClick={() => setPrompt("resume")}>
+                Resume
+              </button>
+            ) : (
+              <button className={styles.buttonSmallDanger} disabled={busy} onClick={() => setPrompt("pause")}>
+                Pause
+              </button>
+            )}
+            <button className={styles.buttonLink} disabled={busy} onClick={() => setPrompt("remove")}>
+              Remove
+            </button>
+          </>
         )}
       </div>
       {prompt && (
         <ReasonPrompt
-          title={prompt === "pause" ? `Pause ${member.userId}?` : `Resume ${member.userId}?`}
+          title={
+            prompt === "pause"
+              ? `Pause ${member.userId}?`
+              : prompt === "resume"
+                ? `Resume ${member.userId}?`
+                : `Remove ${member.userId}? This cannot be undone.`
+          }
           onCancel={() => setPrompt(null)}
           onConfirm={(reason) => act(prompt, reason)}
         />
@@ -1247,7 +1278,7 @@ function InvestorConnectScreen({ onConnect }) {
  * this component also never renders a control that could act on anyone
  * else's behalf, as a second layer of "an investor can't even try."
  */
-function InvestorDashboard({ conn, onDisconnect }) {
+function InvestorDashboard({ conn, onDisconnect, onTokenRotated }) {
   const [overview, setOverview] = useState(null);
   const [decisions, setDecisions] = useState(null);
   const [notifications, setNotifications] = useState(null);
@@ -1255,6 +1286,30 @@ function InvestorDashboard({ conn, onDisconnect }) {
   const [saafSignalUrl, setSaafSignalUrl] = useState(
     () => localStorage.getItem("waynetrade_saaf_signal_url") || ""
   );
+  const [rotating, setRotating] = useState(false);
+  const [newToken, setNewToken] = useState(null);
+
+  async function rotateToken() {
+    if (!confirm("Get a new view token? Your current token stops working the moment this succeeds.")) return;
+    setRotating(true);
+    try {
+      const result = await investorApiFetch(
+        conn.baseUrl,
+        conn.viewToken,
+        `/investor/${conn.memberId}/view-token/regenerate`,
+        { method: "POST" }
+      );
+      // Update the stored connection immediately so this session keeps
+      // working without needing to log out and back in — the old token in
+      // conn.viewToken is now dead the instant the request above succeeded.
+      onTokenRotated(result.viewTokenPlaintext);
+      setNewToken(result.viewTokenPlaintext);
+    } catch (err) {
+      alert(err.message);
+    } finally {
+      setRotating(false);
+    }
+  }
 
   const refresh = useCallback(() => {
     investorApiFetch(conn.baseUrl, conn.viewToken, `/investor/${conn.memberId}/overview`)
@@ -1322,11 +1377,36 @@ function InvestorDashboard({ conn, onDisconnect }) {
               Link Saaf Signal site
             </button>
           )}
+          <button className={styles.buttonGhost} disabled={rotating} onClick={rotateToken}>
+            {rotating ? "Rotating…" : "Get a new view token"}
+          </button>
           <button className={styles.buttonGhost} onClick={onDisconnect}>
             Disconnect
           </button>
         </div>
       </header>
+
+      {newToken && (
+        <div className={styles.modalOverlay} onClick={() => setNewToken(null)}>
+          <div className={styles.modalCard} onClick={(e) => e.stopPropagation()}>
+            <h3 className={styles.h3}>Your new view token</h3>
+            <p className={styles.subtle}>
+              Save this now — it will not be shown again, and your previous
+              token no longer works. This session is already updated to use
+              it; you'll need this if you connect from another device/browser.
+            </p>
+            <label className={styles.label}>
+              New view token
+              <input className={styles.input + " mono"} readOnly value={newToken} />
+            </label>
+            <div className={styles.modalActions}>
+              <button className={styles.buttonPrimary} onClick={() => setNewToken(null)}>
+                Done, I've saved it
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <section className={styles.section}>
         <h2 className={styles.h2}>Your risk settings</h2>
@@ -1420,11 +1500,17 @@ function InvestorApp() {
     setConn(null);
   }
 
+  function tokenRotated(newViewToken) {
+    const updated = { ...conn, viewToken: newViewToken };
+    saveInvestorConnection(updated);
+    setConn(updated);
+  }
+
   if (!conn) {
     return <InvestorConnectScreen onConnect={setConn} />;
   }
 
-  return <InvestorDashboard conn={conn} onDisconnect={disconnect} />;
+  return <InvestorDashboard conn={conn} onDisconnect={disconnect} onTokenRotated={tokenRotated} />;
 }
 
 /**

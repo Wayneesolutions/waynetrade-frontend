@@ -56,6 +56,16 @@ audit trail. Talks directly to a running `waynetrade-backend` deployment.
   from the investor view's header — prompts once, remembers the URL.
   Closes the "one shared dashboard for both roles" gap below, at least for
   investors — brokers/admins still share the one `ADMIN_API_KEY`.
+- **New: "Remove" action on each member row** (admin dashboard) — calls
+  the backend's new `DELETE /onboarding/member/:id` (soft delete to
+  `REMOVED`, reason required via the same `ReasonPrompt` pause/resume
+  already uses). Once removed, no further action shows on that row —
+  matches the backend having no "un-remove" route.
+- **New: "Get a new view token" in the investor view** — self-service
+  rotation, calling the backend's new `POST
+  /investor/:memberId/view-token/regenerate` with the investor's own
+  current token. The new token is shown once in a modal and this session
+  updates itself immediately, no re-login needed.
 
 ## What is NOT built (still open)
 
@@ -67,14 +77,17 @@ audit trail. Talks directly to a running `waynetrade-backend` deployment.
   Anyone with the key can pause anyone or create groups/strategies.
 - **No charts/visualizations of P&L over time** — only per-order and
   per-decision list views.
-- **No editing/removing members or strategies** yet — only creating them
-  (a member's risk:reward ratio can be changed via the backend's
-  `PUT /onboarding/member/:id/risk-profile` directly, no UI for it yet).
+- **Members can now be removed, but strategies still can't be
+  edited/removed** — only created (a member's risk:reward ratio can be
+  changed via the backend's `PUT /onboarding/member/:id/risk-profile`
+  directly, no UI for it yet).
 - **No mobile-specific layout testing** beyond basic responsive CSS.
-- **The investor view (`#investor`) has no expiry/rotation UI of its own.**
-  If an investor loses their view token, only an admin can issue a new one
-  (`POST /onboarding/member/:id/view-token/regenerate`) — there's no
-  "forgot my token" self-service flow.
+- **View tokens still have no expiry** — self-service rotation exists now
+  (above), but only if the investor still HAS a working token. If it's
+  actually lost (not just suspected leaked), only an admin can issue a new
+  one (`POST /onboarding/member/:id/view-token/regenerate`) — there's no
+  "forgot my token" recovery flow, because there's nothing else to verify
+  the requester's identity against.
 - **Not combined with `saaf-signal-frontend`** — the investor view links out
   to it (a plain external link, prompted for once), which is a real but
   small step; the two are still separate deployments with separate design
