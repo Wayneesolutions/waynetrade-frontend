@@ -66,6 +66,20 @@ audit trail. Talks directly to a running `waynetrade-backend` deployment.
   /investor/:memberId/view-token/regenerate` with the investor's own
   current token. The new token is shown once in a modal and this session
   updates itself immediately, no re-login needed.
+- **New: Saaf Signal section** (`src/SignalApp.jsx`) in the admin/broker
+  dashboard — a direct port of the formerly-separate `saaf-signal-frontend`
+  site's core functionality (ticker checker with plain-English + technical
+  views, a permanent Truth Board of hits/misses, a watchlist) onto this
+  same React shell, calling `waynetrade-backend`'s newly in-process
+  `/signal`, `/predict`, `/track-record`, `/watchlist` routes. Deliberately
+  **not** shown in the investor view — see
+  `docs/RA_RIA_DECISION_SUPPORT.md` in `waynetrade-backend` for why a
+  forward-looking forecast surfaced to retail is the thing this project
+  otherwise avoids. Verified end-to-end against a real backend + Postgres
+  (watchlist add/remove); the ticker checker's actual forecast call
+  correctly shows a graceful error in this sandbox, since outbound calls to
+  Yahoo Finance are blocked here — see the backend README's honest-gaps
+  section.
 
 ## What is NOT built (still open)
 
@@ -88,12 +102,14 @@ audit trail. Talks directly to a running `waynetrade-backend` deployment.
   one (`POST /onboarding/member/:id/view-token/regenerate`) — there's no
   "forgot my token" recovery flow, because there's nothing else to verify
   the requester's identity against.
-- **Not combined with `saaf-signal-frontend`** — the investor view links out
-  to it (a plain external link, prompted for once), which is a real but
-  small step; the two are still separate deployments with separate design
-  systems, not one product surface. See `docs/DEVELOPER_GUIDE.md` in
-  `waynetrade-backend` for the fuller "unified frontend" item this is part
-  of.
+- **The standalone `saaf-signal-frontend` site's chat page wasn't ported.**
+  The new Saaf Signal section (above) covers the ticker checker, truth
+  board, and watchlist, but not that site's free-form conversational chat
+  UI — the same plain-English `explain()` output it used is available via
+  the checker view here, just not as a back-and-forth thread.
+  `saaf-signal-frontend` itself still exists as a separate legacy
+  deployment (see its own README) and is no longer the current source for
+  this functionality.
 
 ## Setup
 
