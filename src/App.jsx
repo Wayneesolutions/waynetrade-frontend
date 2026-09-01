@@ -1,5 +1,6 @@
 import { useEffect, useState, useCallback } from "react";
 import styles from "./App.module.css";
+import SignalSection from "./SignalApp";
 
 // HONEST STATUS (see README): this is a first-pass internal dashboard.
 // It reads/writes the waynetrade-backend API directly and does NOT poll
@@ -1160,6 +1161,7 @@ function GroupDashboard({ conn, onDisconnect }) {
 
       <NotificationsSection conn={conn} />
       <ResearchSection conn={conn} />
+      <SignalSection conn={conn} />
 
       {groupPausePrompt && (
         <ReasonPrompt
